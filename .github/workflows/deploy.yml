@@ -1,0 +1,31 @@
+name: Deploy Tracking Engine
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'supabase/**' ]
+  schedule:
+    - cron: '0 0 * * 3' # Automated weekly dataset sync (Every Wednesday at Midnight UTC)
+  workflow_dispatch: # Allows manual trigger from the GitHub UI anytime
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Fetch GeoIP Database File
+        run: |
+          curl -L -o supabase/functions/doorbell/user-country.mmdb "https://github.com/sapics/ip-location-db/releases/download/latest/user-country.mmdb"
+
+      - name: Bundle and Deploy to Supabase
+        run: |
+          supabase functions deploy doorbell --use-api --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

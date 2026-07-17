@@ -1,0 +1,5 @@
+project_id = "vbqqmbtwkvacsdhlcwra"
+
+[functions.doorbell]
+verify_jwt = false
+static_files = ["./functions/doorbell/user-country.mmdb"]

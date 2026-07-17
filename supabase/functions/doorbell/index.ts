@@ -35,6 +35,7 @@ function getErrorMessage(err: unknown): string {
   return "An unknown error occurred";
 }
 
+/**
 function getReader() {
   if (readerPromise) return readerPromise;
 
@@ -47,6 +48,18 @@ function getReader() {
 
     const arrayBuffer = await data.arrayBuffer();
     return new Reader<GeoLookupResponse>(Buffer.from(new Uint8Array(arrayBuffer)));
+  })();
+
+  return readerPromise;
+}
+ */
+
+function getReader() {
+  if (readerPromise) return readerPromise;
+
+  readerPromise = (async () => {
+    const arrayBuffer = await Deno.readFile(new URL("./user-country.mmdb", import.meta.url));
+    return new Reader<GeoLookupResponse>(Buffer.from(arrayBuffer));
   })();
 
   return readerPromise;
