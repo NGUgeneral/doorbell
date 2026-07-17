@@ -2,6 +2,18 @@ import { createClient } from "@supabase/supabase-js"
 import { Reader, type CountryResponse } from "maxmind"
 import { Buffer } from "node:buffer"
 
+interface FlatCountryResponse {
+  country_code?: string;
+}
+
+interface EdgeDeploymentContext {
+  EdgeRuntime?: {
+    waitUntil: (promise: Promise<unknown>) => void;
+  };
+}
+
+type GeoLookupResponse = CountryResponse & FlatCountryResponse;
+
 const PIXEL_BYTES = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
   0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
@@ -11,7 +23,7 @@ const PIXEL_BYTES = new Uint8Array([
   0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
 ]);
 
-let readerPromise: Promise<Reader<CountryResponse>> | null = null;
+let readerPromise: Promise<Reader<GeoLookupResponse>> | null = null;
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
@@ -34,7 +46,7 @@ function getReader() {
     if (error) throw error;
 
     const arrayBuffer = await data.arrayBuffer();
-    return new Reader<CountryResponse>(Buffer.from(new Uint8Array(arrayBuffer)));
+    return new Reader<GeoLookupResponse>(Buffer.from(new Uint8Array(arrayBuffer)));
   })();
 
   return readerPromise;
@@ -57,8 +69,13 @@ Deno.serve(async (req: Request) => {
       try {
         const reader = await getReader();
         const geoData = reader.get(clientIp); 
-        if (geoData?.country?.iso_code) {
-          countryCode = geoData.country.iso_code;
+        
+        if (geoData) {
+          if ("country_code" in geoData && geoData.country_code) {
+            countryCode = geoData.country_code;
+          } else if ("country" in geoData && geoData.country?.iso_code) {
+            countryCode = geoData.country.iso_code;
+          }
         }
       } catch (geoErr: unknown) {
         console.error("[GeoIP] Resolution failed:", getErrorMessage(geoErr));
@@ -114,9 +131,10 @@ Deno.serve(async (req: Request) => {
       }
     })();
 
-    if ("EdgeRuntime" in globalThis) {
-      // @ts-ignore: Live production environment provides this global orchestrator
-      EdgeRuntime.waitUntil(saveAnalyticsTask);
+    const environmentContext = globalThis as unknown as EdgeDeploymentContext;
+
+    if (environmentContext.EdgeRuntime && typeof environmentContext.EdgeRuntime.waitUntil === "function") {
+      environmentContext.EdgeRuntime.waitUntil(saveAnalyticsTask);
     } else {
       await saveAnalyticsTask;
     }
