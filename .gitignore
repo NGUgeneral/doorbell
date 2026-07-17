@@ -16,5 +16,3 @@ coverage/
 .env.local
 
 node_modules/
-
-*.mmdb

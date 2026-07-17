@@ -1,18 +1,4 @@
 import { createClient } from "@supabase/supabase-js"
-import { Reader, type CountryResponse } from "maxmind"
-import { Buffer } from "node:buffer"
-
-interface FlatCountryResponse {
-  country_code?: string;
-}
-
-interface EdgeDeploymentContext {
-  EdgeRuntime?: {
-    waitUntil: (promise: Promise<unknown>) => void;
-  };
-}
-
-type GeoLookupResponse = CountryResponse & FlatCountryResponse;
 
 const PIXEL_BYTES = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
@@ -23,47 +9,15 @@ const PIXEL_BYTES = new Uint8Array([
   0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
 ]);
 
-let readerPromise: Promise<Reader<GeoLookupResponse>> | null = null;
+interface EdgeDeploymentContext {
+  EdgeRuntime?: {
+    waitUntil: (promise: Promise<unknown>) => void;
+  };
+}
+
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
-
-function getErrorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (err && typeof err === "object" && "message" in err) return String(err.message);
-  if (typeof err === "string") return err;
-  return "An unknown error occurred";
-}
-
-/**
-function getReader() {
-  if (readerPromise) return readerPromise;
-
-  readerPromise = (async () => {
-    const { data, error } = await supabaseClient.storage
-      .from("assets")
-      .download("user-country.mmdb");
-
-    if (error) throw error;
-
-    const arrayBuffer = await data.arrayBuffer();
-    return new Reader<GeoLookupResponse>(Buffer.from(new Uint8Array(arrayBuffer)));
-  })();
-
-  return readerPromise;
-}
- */
-
-function getReader() {
-  if (readerPromise) return readerPromise;
-
-  readerPromise = (async () => {
-    const arrayBuffer = await Deno.readFile(new URL("./user-country.mmdb", import.meta.url));
-    return new Reader<GeoLookupResponse>(Buffer.from(arrayBuffer));
-  })();
-
-  return readerPromise;
-}
 
 Deno.serve(async (req: Request) => {
   const pixelResponse = new Response(PIXEL_BYTES, {
@@ -80,18 +34,18 @@ Deno.serve(async (req: Request) => {
 
     if (clientIp && clientIp !== "127.0.0.1" && clientIp !== "::1") {
       try {
-        const reader = await getReader();
-        const geoData = reader.get(clientIp); 
-        
-        if (geoData) {
-          if ("country_code" in geoData && geoData.country_code) {
-            countryCode = geoData.country_code;
-          } else if ("country" in geoData && geoData.country?.iso_code) {
-            countryCode = geoData.country.iso_code;
-          }
+        // Query the table inline using raw PostgREST data operators matching the GiST layout
+        const { data, error } = await supabaseClient
+          .from("geoip_country_blocks")
+          .select("country_code")
+          .filter("network", "cs", clientIp)
+          .maybeSingle();
+
+        if (!error && data) {
+          countryCode = data.country_code;
         }
-      } catch (geoErr: unknown) {
-        console.error("[GeoIP] Resolution failed:", getErrorMessage(geoErr));
+      } catch (geoErr) {
+        console.error("[GeoIP] Inline SQL Look-up Exception:", geoErr);
       }
     }
 
@@ -100,52 +54,34 @@ Deno.serve(async (req: Request) => {
     const refererHeader = req.headers.get("referer") || "";
 
     if (!pagePath) {
-      if (refererHeader) {
-        try {
-          pagePath = new URL(refererHeader).pathname;
-        } catch {
-          pagePath = "Malformed-Referer";
-        }
-      } else {
-        pagePath = "Direct";
-      }
+      pagePath = refererHeader ? new URL(refererHeader).pathname : "Direct";
     }
 
     const userAgent = req.headers.get("user-agent") || "";
     const deviceType = /Mobi|Android|iPhone/i.test(userAgent) ? "Mobile" : "Desktop";
     const isBot = /bot|crawler|spider|copt|mediapartners/i.test(userAgent);
     
-    let referrerHost = "Bot";
-    if (!isBot && pagePath !== "unknown") {
-      referrerHost = "Direct";
-      if (refererHeader) {
-        try {
-          const parsedHost = new URL(refererHeader).hostname;
-          referrerHost = (parsedHost === "iegor.dev" || parsedHost === "localhost") ? "Direct" : parsedHost;
-        } catch {
-          referrerHost = "Malformed";
-        }
+    let referrerHost = isBot ? "Bot" : "Direct";
+    if (!isBot && refererHeader) {
+      try {
+        const parsedHost = new URL(refererHeader).hostname;
+        referrerHost = (parsedHost === "iegor.dev" || parsedHost === "localhost") ? "Direct" : parsedHost;
+      } catch {
+        referrerHost = "Malformed";
       }
     }
 
     const saveAnalyticsTask = (async () => {
-      const { error: dbError } = await supabaseClient
-        .from("doorbell_pageviews")
-        .insert([{
-          page_path: pagePath,
-          country_code: countryCode,
-          device_type: deviceType,
-          referrer_host: referrerHost,
-          hit_date: new Date().toISOString(),
-        }]);
-
-      if (dbError) {
-        console.error("DB Write Error:", dbError.message);
-      }
+      await supabaseClient.from("doorbell_pageviews").insert([{
+        page_path: pagePath,
+        country_code: countryCode,
+        device_type: deviceType,
+        referrer_host: referrerHost,
+        hit_date: new Date().toISOString(),
+      }]);
     })();
 
     const environmentContext = globalThis as unknown as EdgeDeploymentContext;
-
     if (environmentContext.EdgeRuntime && typeof environmentContext.EdgeRuntime.waitUntil === "function") {
       environmentContext.EdgeRuntime.waitUntil(saveAnalyticsTask);
     } else {
@@ -154,8 +90,8 @@ Deno.serve(async (req: Request) => {
 
     return pixelResponse;
 
-  } catch (err: unknown) {
-    console.error("Doorbell Ingestion Error:", getErrorMessage(err));
+  } catch (err) {
+    console.error("Tracker Ingestion Fault:", err);
     return pixelResponse;
   }
 });

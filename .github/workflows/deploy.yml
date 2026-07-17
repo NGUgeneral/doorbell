@@ -1,4 +1,4 @@
-name: Deploy Tracking Engine
+name: Deploy Tracking Engine & Sync DB Matrix
 
 on:
   push:
@@ -6,26 +6,62 @@ on:
     paths: [ 'supabase/**' ]
   schedule:
     - cron: '0 0 * * 3' # Automated weekly dataset sync (Every Wednesday at Midnight UTC)
-  workflow_dispatch: # Allows manual trigger from the GitHub UI anytime
+  workflow_dispatch:
 
 jobs:
-  deploy:
+  deploy-and-sync:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Codebase
         uses: actions/checkout@v4
 
-      - name: Setup Supabase CLI
+      - name: Setup Supabase CLI Tooling
         uses: supabase/setup-cli@v1
         with:
           version: latest
 
-      - name: Fetch GeoIP Database File
-        run: |
-          curl -L -o supabase/functions/doorbell/user-country.mmdb "https://github.com/sapics/ip-location-db/releases/download/latest/user-country.mmdb"
-
-      - name: Bundle and Deploy to Supabase
+      # 1. Deploy doorbell edge function code to the Supabase Edge Runtime environment
+      - name: Deploy Tracker Code to Edge Runtime
         run: |
           supabase functions deploy doorbell --use-api --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      # 2. Extract the source CSV data matrix, drop old records, and rebuild the database rows
+      - name: Refresh PostgreSQL Subnet Lookups
+        run: |
+          # Fetch the CIDR-specific network format instead of the raw start/end IP range asset
+          curl -L -o user-country.csv "https://github.com/sapics/ip-location-db/releases/download/latest/user-country-ipv4-cidr.csv"
+          
+          # Link to your project explicitly using the CLI management API
+          supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
+          
+          # Clear out the stale database records
+          supabase db query --linked "TRUNCATE TABLE public.geoip_country_blocks;"
+          
+          # Split the file into manageable 50k-line chunks to respect the CLI's request size limits
+          split -l 50000 user-country.csv chunk_ --additional-suffix=.csv
+          
+          # Iterate over each chunk and stream it into the table via the CLI native wrapper
+          for chunk in chunk_*.csv; do
+            echo "Processing $chunk..."
+            
+            # Start a standard SQL multi-row INSERT statement
+            echo "INSERT INTO public.geoip_country_blocks (network, country_code) VALUES" > upload_chunk.sql
+            
+            # Extract column 1 (CIDR) and column 2 (2-letter code), formatting them safely into values.
+            # It explicitly double-checks that the country code length is exactly 2 to prevent any stray schema errors.
+            awk -F',' 'length($2) == 2 {print "('\''" $1 "'\'', '\''" $2 "'\''),"}' "$chunk" >> upload_chunk.sql
+            
+            # Replace the final trailing comma with a terminating semicolon to complete the query safely
+            sed -i '$ s/),$/);/' upload_chunk.sql
+            
+            # Execute the pure SQL query block via the verified CLI pipeline
+            supabase db query --linked --file upload_chunk.sql
+          done
+          
+          # Clean up runner workspace assets
+          rm -f chunk_*.csv upload_chunk.sql user-country.csv
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
