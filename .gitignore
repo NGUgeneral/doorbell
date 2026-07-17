@@ -9,3 +9,10 @@
 # https://docs.deno.com/runtime/reference/cli/coverage/
 coverage/
 *.lcov
+
+.vscode/
+
+.env
+.env.local
+
+node_modules/
