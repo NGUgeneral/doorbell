@@ -1,5 +1,5 @@
-import { createClient } from "@supabase/supabase-js"
-import postgres from "postgres"
+import { createClient } from "@supabase/supabase-js";
+import postgres from "postgres";
 
 const PIXEL_BYTES = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
@@ -18,10 +18,60 @@ interface EdgeDeploymentContext {
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
+export const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
 
 const dbUrl = Deno.env.get("SUPABASE_DB_URL")!;
-const sql = postgres(dbUrl);
+export const sql = postgres(dbUrl);
+
+export function resolvePayloadMetrics(userAgent: string, refererHeader: string) {
+  const deviceType = /Mobi|Android|iPhone/i.test(userAgent) ? "Mobile" : "Desktop";
+  const isBot = /bot|crawler|spider|copt|mediapartners/i.test(userAgent);
+  
+  let referrerHost = isBot ? "Bot" : "Direct";
+  if (!isBot && refererHeader) {
+    try {
+      const parsedHost = new URL(refererHeader).hostname;
+      referrerHost = (parsedHost === "iegor.dev" || parsedHost === "localhost") ? "Direct" : parsedHost;
+    } catch {
+      referrerHost = "Malformed";
+    }
+  }
+
+  return { deviceType, referrerHost, isBot };
+}
+
+export async function resolveCountryCode(clientIp: string): Promise<string> {
+  if (!clientIp || clientIp === "127.0.0.1" || clientIp === "::1") {
+    return "XX";
+  }
+  
+  try {
+    const result = await sql`
+      SELECT country_code 
+      FROM public.geoip_country_blocks 
+      WHERE network >> ${clientIp}::inet 
+      LIMIT 1
+    `;
+    if (result && result.length > 0) {
+      return result[0].country_code.trim();
+    }
+  } catch (geoErr) {
+    console.error("[GeoIP Exception]:", geoErr);
+  }
+  return "XX";
+}
+
+export async function saveAnalyticsRow(payload: {
+  page_path: string;
+  country_code: string;
+  device_type: string;
+  referrer_host: string;
+}) {
+  return await supabaseClient.from("doorbell_pageviews").insert([{
+    ...payload,
+    hit_date: new Date().toISOString(),
+  }]);
+}
 
 Deno.serve(async (req: Request) => {
   const pixelResponse = new Response(PIXEL_BYTES, {
@@ -33,25 +83,8 @@ Deno.serve(async (req: Request) => {
   });
 
   try {
-    const clientIp = req.headers.get("x-real-ip") || req.headers.get("cf-connecting-ip");
-    let countryCode = "XX";
-
-    if (clientIp && clientIp !== "127.0.0.1" && clientIp !== "::1") {
-      try {
-        const result = await sql`
-          SELECT country_code 
-          FROM public.geoip_country_blocks 
-          WHERE network >> ${clientIp}::inet 
-          LIMIT 1
-        `;
-
-        if (result && result.length > 0) {
-          countryCode = result[0].country_code.trim();
-        }
-      } catch (geoErr) {
-        console.error("[GeoIP Exception]:", geoErr);
-      }
-    }
+    const clientIp = req.headers.get("x-real-ip") || req.headers.get("cf-connecting-ip") || "";
+    const countryCode = await resolveCountryCode(clientIp);
 
     const url = new URL(req.url);
     let pagePath = url.searchParams.get("path");
@@ -62,28 +95,14 @@ Deno.serve(async (req: Request) => {
     }
 
     const userAgent = req.headers.get("user-agent") || "";
-    const deviceType = /Mobi|Android|iPhone/i.test(userAgent) ? "Mobile" : "Desktop";
-    const isBot = /bot|crawler|spider|copt|mediapartners/i.test(userAgent);
-    
-    let referrerHost = isBot ? "Bot" : "Direct";
-    if (!isBot && refererHeader) {
-      try {
-        const parsedHost = new URL(refererHeader).hostname;
-        referrerHost = (parsedHost === "iegor.dev" || parsedHost === "localhost") ? "Direct" : parsedHost;
-      } catch {
-        referrerHost = "Malformed";
-      }
-    }
+    const { deviceType, referrerHost } = resolvePayloadMetrics(userAgent, refererHeader);
 
-    const saveAnalyticsTask = (async () => {
-      await supabaseClient.from("doorbell_pageviews").insert([{
-        page_path: pagePath,
-        country_code: countryCode,
-        device_type: deviceType,
-        referrer_host: referrerHost,
-        hit_date: new Date().toISOString(),
-      }]);
-    })();
+    const saveAnalyticsTask = saveAnalyticsRow({
+      page_path: pagePath,
+      country_code: countryCode,
+      device_type: deviceType,
+      referrer_host: referrerHost,
+    });
 
     const environmentContext = globalThis as unknown as EdgeDeploymentContext;
     if (environmentContext.EdgeRuntime && typeof environmentContext.EdgeRuntime.waitUntil === "function") {

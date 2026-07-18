@@ -1,6 +1,8 @@
 {
     "imports": {
         "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2",
-        "postgres": "npm:postgres@^3.4.4"
+        "postgres": "npm:postgres@^3.4.4",
+        "std/assert": "https://deno.land/std@0.224.0/assert/mod.ts",
+        "std/testing/mock": "https://deno.land/std@0.224.0/testing/mock.ts"
     }
 }
