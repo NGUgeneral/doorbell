@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js"
+import postgres from "postgres"
 
 const PIXEL_BYTES = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
@@ -19,6 +20,9 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
 
+const dbUrl = Deno.env.get("SUPABASE_DB_URL")!;
+const sql = postgres(dbUrl);
+
 Deno.serve(async (req: Request) => {
   const pixelResponse = new Response(PIXEL_BYTES, {
     headers: {
@@ -34,18 +38,18 @@ Deno.serve(async (req: Request) => {
 
     if (clientIp && clientIp !== "127.0.0.1" && clientIp !== "::1") {
       try {
-        // Query the table inline using raw PostgREST data operators matching the GiST layout
-        const { data, error } = await supabaseClient
-          .from("geoip_country_blocks")
-          .select("country_code")
-          .filter("network", "cs", clientIp)
-          .maybeSingle();
+        const result = await sql`
+          SELECT country_code 
+          FROM public.geoip_country_blocks 
+          WHERE network >> ${clientIp}::inet 
+          LIMIT 1
+        `;
 
-        if (!error && data) {
-          countryCode = data.country_code;
+        if (result && result.length > 0) {
+          countryCode = result[0].country_code.trim();
         }
       } catch (geoErr) {
-        console.error("[GeoIP] Inline SQL Look-up Exception:", geoErr);
+        console.error("[GeoIP Exception]:", geoErr);
       }
     }
 

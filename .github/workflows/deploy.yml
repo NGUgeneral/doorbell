@@ -27,10 +27,10 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
-      # 2. Extract the source CSV data matrix, drop old records, and rebuild the database rows
+      # 2. Hydrate the PostgreSQL subnet lookups with the latest data
       - name: Refresh PostgreSQL Subnet Lookups
         run: |
-          # Fetch the CIDR-specific network format instead of the raw start/end IP range asset
+          # Fetch the up-to-date CSV dataset from the official SAPICS IP Location DB repository
           curl -L -o user-country.csv "https://github.com/sapics/ip-location-db/releases/download/latest/user-country-ipv4-cidr.csv"
           
           # Link to your project explicitly using the CLI management API
@@ -41,26 +41,18 @@ jobs:
           
           # Split the file into manageable 50k-line chunks to respect the CLI's request size limits
           split -l 50000 user-country.csv chunk_ --additional-suffix=.csv
-          
-          # Iterate over each chunk and stream it into the table via the CLI native wrapper
+
           for chunk in chunk_*.csv; do
             echo "Processing $chunk..."
-            
-            # Start a standard SQL multi-row INSERT statement
             echo "INSERT INTO public.geoip_country_blocks (network, country_code) VALUES" > upload_chunk.sql
-            
-            # Extract column 1 (CIDR) and column 2 (2-letter code), formatting them safely into values.
-            # It explicitly double-checks that the country code length is exactly 2 to prevent any stray schema errors.
             awk -F',' 'length($2) == 2 {print "('\''" $1 "'\'', '\''" $2 "'\''),"}' "$chunk" >> upload_chunk.sql
             
             # Replace the final trailing comma with a terminating semicolon to complete the query safely
             sed -i '$ s/),$/);/' upload_chunk.sql
-            
-            # Execute the pure SQL query block via the verified CLI pipeline
+
             supabase db query --linked --file upload_chunk.sql
           done
-          
-          # Clean up runner workspace assets
+
           rm -f chunk_*.csv upload_chunk.sql user-country.csv
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
