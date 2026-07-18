@@ -20,14 +20,28 @@ jobs:
         with:
           version: latest
 
-      # 1. Deploy doorbell edge function code to the Supabase Edge Runtime environment
+      - name: Setup Deno Runtime Environment
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+
+      # 1. Validate application stability via unit and integration tests
+      - name: Run Test Suite
+        run: |
+          supabase functions test doorbell
+        env:
+          SUPABASE_URL: "http://localhost"
+          SUPABASE_SERVICE_ROLE_KEY: "mock"
+          SUPABASE_DB_URL: "postgresql://mock"
+
+      # 2. Deploy doorbell edge function code to the Supabase Edge Runtime environment
       - name: Deploy Tracker Code to Edge Runtime
         run: |
           supabase functions deploy doorbell --use-api --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
-      # 2. Hydrate the PostgreSQL subnet lookups with the latest data
+      # 3. Hydrate the PostgreSQL subnet lookups with the latest data
       - name: Refresh PostgreSQL Subnet Lookups
         run: |
           # Fetch the up-to-date CSV dataset from the official SAPICS IP Location DB repository
