@@ -28,7 +28,7 @@ jobs:
       # 1. Validate application stability via unit and integration tests
       - name: Run Test Suite
         run: |
-          supabase functions test doorbell
+          deno test --allow-env --allow-net --no-lock --config supabase/functions/doorbell/deno.json supabase/functions/doorbell/test_index.ts
         env:
           SUPABASE_URL: "http://localhost"
           SUPABASE_SERVICE_ROLE_KEY: "mock"
