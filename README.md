@@ -1,12 +1,12 @@
-# doorbell
-A GDPR-compliant, serverless analytics ingestion engine without cookie banners or client-side scripts. Built to aggregate anonymous traffic data using cloud-native functions, offering extensible implementations across multiple languages and platforms.
+# doorbell 
 
----
+Cloud-native, open-source, anonymous pageview analytics engine that runs entirely server-side inside the Supabase ecosystem for exactly $0 per month.
 
-Doorbell - is a serverless function, which is responsible to store anonymous, GDPR compliant, pageview data.
-This folder stores the DB-seeding schemas and implementations for different cloud platforms.
-user-country.mmdb is provided by https://github.com/sapics/ip-location-db
+Core Features:
+- True Zero-JS Integration: On the client side, registration is entirely handled by a standard, non-blocking 1x1 transparent `<img>` tag in your HTML footer. It fails silently without touching your UI application thread.
+- Strict Privacy-First (GDPR-Exempt): By design, the engine immediately drops visitor IP addresses, user-agent details, and session fingerprint hashes. It logs only flat, strictly anonymous vectors (`page_path`, `referrer_host`, `country_code`, `device_type`, `hit_date`).
+No cookie popups required.
+- Sub-Millisecond Execution: Built on Supabase Edge Functions (Deno). Utilizing `EdgeRuntime.waitUntil()`, the function decouples execution paths - returning the pixel immediately to the browser while logging the payload asynchronously in the background.
+- Zero Infrastructure Overhead: Deploys completely within the Supabase free tier limits. It uses system-reserved variables out of the box, requiring zero external security tokens, credentials, or third-party API dependencies.
 
-TODO: move it into a dedicated repo with it's own CI/CD.
-- fetch .mmdb in a supabase cron job;
-- add the .mmdb into Deno filesystem, right next to Edge Function resolver, so the db will be read directly instead of being fetched on every cold start from the storage; 
+Whether you are running a minimalist developer portfolio, a static documentation hub, or a lightweight landing page, `doorbell` gives you directional heatmaps without the bloat.
