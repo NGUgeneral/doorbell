@@ -20,8 +20,11 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 export const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
 
-const dbUrl = Deno.env.get("SUPABASE_DB_URL")!;
-export const sql = postgres(dbUrl);
+export const sql = postgres(Deno.env.get("SUPABASE_DB_URL")!, {
+  max: 1,
+  idle_timeout: 10,
+  connect_timeout: 2,
+});
 
 export function resolvePayloadMetrics(userAgent: string, refererHeader: string) {
   const deviceType = /Mobi|Android|iPhone/i.test(userAgent) ? "Mobile" : "Desktop";
