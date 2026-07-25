@@ -26,6 +26,20 @@ export const sql = postgres(Deno.env.get("SUPABASE_DB_URL")!, {
   connect_timeout: 2,
 });
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallbackValue: T): Promise<T> {
+  let timerId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timerId = setTimeout(() => resolve(fallbackValue), timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    return result;
+  } finally {
+    if (timerId !== undefined) clearTimeout(timerId);
+  }
+}
+
 export function resolvePayloadMetrics(userAgent: string, refererHeader: string) {
   const deviceType = /Mobi|Android|iPhone/i.test(userAgent) ? "Mobile" : "Desktop";
   const isBot = /bot|crawler|spider|copt|mediapartners/i.test(userAgent);
@@ -87,7 +101,12 @@ Deno.serve(async (req: Request) => {
 
   try {
     const clientIp = req.headers.get("x-real-ip") || req.headers.get("cf-connecting-ip") || "";
-    const countryCode = await resolveCountryCode(clientIp);
+
+    const countryCode = await withTimeout(
+      resolveCountryCode(clientIp),
+      2000,
+      "XX"
+    );
 
     const url = new URL(req.url);
     let pagePath = url.searchParams.get("path");
