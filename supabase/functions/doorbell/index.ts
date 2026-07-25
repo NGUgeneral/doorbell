@@ -1,6 +1,4 @@
-console.log("=== MODULE INITIALIZING ===");
-
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import postgres from "postgres";
 
 const PIXEL_BYTES = new Uint8Array([
@@ -18,15 +16,28 @@ interface EdgeDeploymentContext {
   };
 }
 
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-export const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
+let supabaseClientInstance: SupabaseClient | null = null;
+let sqlInstance: ReturnType<typeof postgres> | null = null;
 
-export const sql = postgres(Deno.env.get("SUPABASE_DB_URL")!, {
-  max: 1,
-  idle_timeout: 10,
-  connect_timeout: 2,
-});
+export function getSupabaseClient(): SupabaseClient {
+  if (!supabaseClientInstance) {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    supabaseClientInstance = createClient(supabaseUrl, supabaseServiceKey);
+  }
+  return supabaseClientInstance;
+}
+
+export function getSql(): ReturnType<typeof postgres> {
+  if (!sqlInstance) {
+    sqlInstance = postgres(Deno.env.get("SUPABASE_DB_URL")!, {
+      max: 1,
+      idle_timeout: 5,
+      connect_timeout: 2,
+    });
+  }
+  return sqlInstance;
+}
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallbackValue: T): Promise<T> {
   let timerId: ReturnType<typeof setTimeout> | undefined;
@@ -35,8 +46,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallbackVa
   });
 
   try {
-    const result = await Promise.race([promise, timeoutPromise]);
-    return result;
+    return await Promise.race([promise, timeoutPromise]);
   } finally {
     if (timerId !== undefined) clearTimeout(timerId);
   }
@@ -65,6 +75,7 @@ export async function resolveCountryCode(clientIp: string): Promise<string> {
   }
   
   try {
+    const sql = getSql();
     const result = await sql`
       SELECT country_code 
       FROM public.geoip_country_blocks 
@@ -86,14 +97,14 @@ export async function saveAnalyticsRow(payload: {
   device_type: string;
   referrer_host: string;
 }) {
-  return await supabaseClient.from("doorbell_pageviews").insert([{
+  const supabase = getSupabaseClient();
+  return await supabase.from("doorbell_pageviews").insert([{
     ...payload,
     hit_date: new Date().toISOString(),
   }]);
 }
 
 Deno.serve(async (req: Request) => {
-  console.log("=== REQUEST HANDLER ENTERED ===");
   const pixelResponse = new Response(PIXEL_BYTES, {
     headers: {
       "Content-Type": "image/png",
