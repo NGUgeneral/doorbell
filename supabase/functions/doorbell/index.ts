@@ -1,3 +1,5 @@
+console.log("=== MODULE INITIALIZING ===");
+
 import { createClient } from "@supabase/supabase-js";
 import postgres from "postgres";
 
@@ -91,6 +93,7 @@ export async function saveAnalyticsRow(payload: {
 }
 
 Deno.serve(async (req: Request) => {
+  console.log("=== REQUEST HANDLER ENTERED ===");
   const pixelResponse = new Response(PIXEL_BYTES, {
     headers: {
       "Content-Type": "image/png",
