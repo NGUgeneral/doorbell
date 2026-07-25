@@ -1,10 +1,17 @@
 import { assertEquals } from "std/assert";
 import { spy, stub } from "std/testing/mock";
-import { resolvePayloadMetrics, resolveCountryCode, saveAnalyticsRow, supabaseClient, sql } from "./index.ts";
+import { 
+  resolvePayloadMetrics, 
+  resolveCountryCode, 
+  saveAnalyticsRow, 
+  getSupabaseClient, 
+  getSql 
+} from "./index.ts";
 
 Deno.test({
   name: "Teardown - Close active DB sockets",
   fn: async () => {
+    const sql = getSql();
     await sql.end();
   },
   sanitizeResources: false,
@@ -42,6 +49,7 @@ Deno.test("Payload Metrics - Strips domain to Direct for local/self referrers", 
 // ==========================================
 
 Deno.test("Database Read - Successfully resolves mocked IP network block matching", async () => {
+  const sql = getSql();
   const mockRows = [{ country_code: "NL " }];
   Object.defineProperty(mockRows, "count", { value: 1 });
 
@@ -72,6 +80,7 @@ Deno.test("Database Read - Successfully resolves mocked IP network block matchin
 // ==========================================
 
 Deno.test("Database Write - Shape validation structures rows cleanly without errors", async () => {
+  const supabaseClient = getSupabaseClient();
   const testPayload = {
     page_path: "/test-automation-route",
     country_code: "TS",
