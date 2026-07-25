@@ -23,7 +23,12 @@ export function getSupabaseClient(): SupabaseClient {
   if (!supabaseClientInstance) {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    supabaseClientInstance = createClient(supabaseUrl, supabaseServiceKey);
+    supabaseClientInstance = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
   }
   return supabaseClientInstance;
 }
