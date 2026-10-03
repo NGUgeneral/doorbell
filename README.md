@@ -110,3 +110,41 @@ Because worldwide subnets change regularly, the repository contains a scheduled 
 
 ### Platform Portability Notes
 While currently configured to run seamlessly out-of-the-box on the Supabase ecosystem (leveraging system-injected variables like `SUPABASE_DB_URL`), the application layer is entirely decoupled. Because it is written in pure Deno/TypeScript adhering strictly to Web-standard APIs (`fetch`, `Request`, `Response`, `EdgeRuntime`), it can be migrated swiftly onto alternative V8 edge runtime clouds such as Cloudflare Workers or Vercel Edge with minor driver adjustments.
+
+---
+
+## Privacy & GDPR / ePrivacy Compliance
+
+`doorbell` is designed from the ground up for privacy-first, cookie-free analytics. It allows site owners to measure traffic trends without harvesting personal data or requiring intrusive consent banners.
+
+### Key Privacy Principles
+
+* **Zero Persistent Cookies or Local Storage:** `doorbell` does not read or set cookies, local storage, session storage, or device fingerprints. It operates entirely outside the scope of the EU ePrivacy Directive consent requirements.
+* **In-Memory IP Processing Only:** Incoming HTTP request IP addresses (`x-real-ip` / `cf-connecting-ip`) are processed briefly in volatile memory at the edge solely to execute a local GeoIP lookup (`country_code`). **IP addresses are never logged, stored in the database, or persisted anywhere.**
+* **No Cross-Site Tracking:** Data is strictly site-isolated. Pageviews cannot be linked to individual visitors across sessions or domains.
+
+### Legal Basis under GDPR
+
+Under Article 6(1)(f) of the General Data Protection Regulation (GDPR), processing incoming IP addresses in-memory to determine aggregate country-level metrics qualifies as a **Legitimate Interest** for basic operational analytics and security monitoring. 
+
+Because personal data (the IP address) is immediately anonymized to a coarse geographic metric (`country_code`) before database insertion, `doorbell` maintains high privacy protection while delivering minimal, actionable analytics.
+
+### Data Collected
+
+Every recorded pageview consists strictly of the following non-PII fields:
+
+| Field | Description | Example |
+| :--- | :--- | :--- |
+| `page_path` | The URL path visited | `/projects` |
+| `country_code` | Two-letter ISO country code resolved in-memory | `NL` |
+| `device_type` | Categorized from `User-Agent` | `Desktop` \| `Mobile` |
+| `referrer_host` | Domain of the referring page | `github.com` \| `Direct` |
+| `hit_date` | UTC ISO timestamp of the request | `2026-10-03T19:35:00.000Z` |
+
+---
+
+### Suggested Disclosure for Site Visitors
+
+If you deploy `doorbell` on your site, you can include the following concise statement in your privacy disclosure or `/privacy` page:
+
+> **Analytics Disclosure:** This site uses `doorbell`, an open-source, self-hosted edge function to collect minimal, aggregate pageview metrics (page path, country, device type, and referrer). Incoming IP addresses are processed briefly in memory to determine country origin and are never stored or logged. No cookies or persistent tracking identifiers are used. Processing relies on Legitimate Interest (GDPR Art. 6(1)(f)).
